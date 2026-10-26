@@ -35,7 +35,7 @@ conn();
 var tvu=document.getElementById('tvurl');
 function info(){
   fetch('/info').then(function(r){return r.json()}).then(function(j){
-    tvu.textContent=j.tv.length?'On the TV browser open:  '+j.tv.join('   or   ').replace(/http:\/\//g,''):'Turn ON your phone Hotspot and connect the TV to it. (Try 192.168.43.1:'+location.port+' on the TV)';
+    tvu.textContent=j.tv.length?'Now open the TV Pad app on your TV (it connects by itself)':'Turn ON your phone Hotspot and connect the TV to it';
   }).catch(function(){});
 }
 info();setInterval(info,5000);
