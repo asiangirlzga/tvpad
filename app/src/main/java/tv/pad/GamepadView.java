@@ -5,29 +5,26 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.util.SparseArray;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 
 import java.util.ArrayList;
 import java.util.List;
 
-/** Touch gamepad: left stick, A/B/X/Y, shoulders, start/select and a few toggles. Multi-touch. */
+/** Touch gamepad. Every control produces Android key codes, which games on the TV already understand. */
 public class GamepadView extends View {
     public interface Host {
-        void onInput();
+        void onKey(int code, boolean down);
         void onAction(int id);
     }
 
-    // HID button bits (match Android's gamepad key mapping order)
-    public static final int A = 1, B = 1 << 1, X = 1 << 3, Y = 1 << 4, L1 = 1 << 6, R1 = 1 << 7,
-            L2 = 1 << 8, R2 = 1 << 9, SEL = 1 << 10, START = 1 << 11;
-    public static final int ACT_KEYS = 1, ACT_TILT = 2, ACT_DPAD = 3, ACT_CONNECT = 4, ACT_PAIR = 5;
+    public static final int ACT_TILT = 1;
 
     private static class Btn {
         String label;
-        boolean round;
-        int bit, act, color;
-        boolean down;
+        boolean round, down;
+        int key, act, color;
         final RectF r = new RectF();
         float cx, cy, rad;
     }
@@ -39,20 +36,20 @@ public class GamepadView extends View {
     private final Host host;
     private float scx, scy, sr, u;
     private boolean stickHeld;
+    private float sx, sy, tiltX;
+    // up, down, left, right
+    private final int[] dirKey = {KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT};
+    private final boolean[] dirOn = new boolean[4];
 
-    // state read by the activity
-    public int buttons;
-    public float sx, sy;
-    public boolean keys, tilt, dpad;
-    public String status = "Not connected";
+    public boolean tilt;
+    public String status = "Starting...";
 
     public GamepadView(Context c, Host host) {
         super(c);
         this.host = host;
         p.setTextAlign(Paint.Align.CENTER);
     }
-
-    public boolean stickHeld() { return stickHeld; }
 
     @Override
     protected void onSizeChanged(int w, int h, int ow, int oh) {
@@ -61,33 +58,30 @@ public class GamepadView extends View {
         scx = w * 0.20f; scy = 66 * u; sr = 24 * u;
         int grey = 0xFF37474F;
         float fx = w * 0.80f, fy = 62 * u, d = 16 * u;
-        round("A", fx, fy + d, 9 * u, A, 0xFF43A047);
-        round("B", fx + d, fy, 9 * u, B, 0xFFE53935);
-        round("X", fx - d, fy, 9 * u, X, 0xFF1E88E5);
-        round("Y", fx, fy - d, 9 * u, Y, 0xFFFDD835);
-        rect("L1", w * 0.10f, 9 * u, 11 * u, 5 * u, L1, 0, grey);
-        rect("L2", w * 0.10f, 21 * u, 11 * u, 5 * u, L2, 0, grey);
-        rect("R1", w * 0.90f, 9 * u, 11 * u, 5 * u, R1, 0, grey);
-        rect("R2", w * 0.90f, 21 * u, 11 * u, 5 * u, R2, 0, grey);
-        rect("SELECT", w * 0.41f, 20 * u, 10 * u, 5 * u, SEL, 0, grey);
-        rect("START", w * 0.59f, 20 * u, 10 * u, 5 * u, START, 0, grey);
-        rect("CONNECT", w * 0.41f, 34 * u, 10 * u, 5 * u, 0, ACT_CONNECT, 0xFF00796B);
-        rect("PAIR NEW", w * 0.59f, 34 * u, 10 * u, 5 * u, 0, ACT_PAIR, 0xFF00796B);
-        rect("", w * 0.38f, 91 * u, 10 * u, 5 * u, 0, ACT_KEYS, grey);
+        round("A", fx, fy + d, 9 * u, KeyEvent.KEYCODE_BUTTON_A, 0xFF43A047);
+        round("B", fx + d, fy, 9 * u, KeyEvent.KEYCODE_BUTTON_B, 0xFFE53935);
+        round("X", fx - d, fy, 9 * u, KeyEvent.KEYCODE_BUTTON_X, 0xFF1E88E5);
+        round("Y", fx, fy - d, 9 * u, KeyEvent.KEYCODE_BUTTON_Y, 0xFFFDD835);
+        rect("L1", w * 0.10f, 9 * u, 11 * u, 5 * u, KeyEvent.KEYCODE_1, 0, grey);
+        rect("L2 BRAKE", w * 0.10f, 21 * u, 11 * u, 5 * u, KeyEvent.KEYCODE_BUTTON_L2, 0, grey);
+        rect("R1", w * 0.90f, 9 * u, 11 * u, 5 * u, KeyEvent.KEYCODE_3, 0, grey);
+        rect("R2 GAS", w * 0.90f, 21 * u, 11 * u, 5 * u, KeyEvent.KEYCODE_BUTTON_R2, 0, grey);
+        rect("BACK", w * 0.41f, 20 * u, 10 * u, 5 * u, KeyEvent.KEYCODE_BACK, 0, grey);
+        rect("START", w * 0.59f, 20 * u, 10 * u, 5 * u, KeyEvent.KEYCODE_BUTTON_START, 0, grey);
+        rect("OK", w * 0.50f, 34 * u, 10 * u, 5 * u, KeyEvent.KEYCODE_DPAD_CENTER, 0, 0xFF00796B);
         rect("", w * 0.50f, 91 * u, 10 * u, 5 * u, 0, ACT_TILT, grey);
-        rect("", w * 0.62f, 91 * u, 10 * u, 5 * u, 0, ACT_DPAD, grey);
     }
 
-    private void round(String l, float cx, float cy, float rad, int bit, int color) {
+    private void round(String l, float cx, float cy, float rad, int key, int color) {
         Btn b = new Btn();
-        b.label = l; b.round = true; b.bit = bit; b.color = color; b.cx = cx; b.cy = cy; b.rad = rad;
+        b.label = l; b.round = true; b.key = key; b.color = color; b.cx = cx; b.cy = cy; b.rad = rad;
         b.r.set(cx - rad * 1.15f, cy - rad * 1.15f, cx + rad * 1.15f, cy + rad * 1.15f);
         btns.add(b);
     }
 
-    private void rect(String l, float cx, float cy, float hw, float hh, int bit, int act, int color) {
+    private void rect(String l, float cx, float cy, float hw, float hh, int key, int act, int color) {
         Btn b = new Btn();
-        b.label = l; b.bit = bit; b.act = act; b.color = color; b.cx = cx; b.cy = cy;
+        b.label = l; b.key = key; b.act = act; b.color = color; b.cx = cx; b.cy = cy;
         b.r.set(cx - hw, cy - hh, cx + hw, cy + hh);
         b.r.inset(-u, -u);
         btns.add(b);
@@ -96,21 +90,18 @@ public class GamepadView extends View {
     @Override
     protected void onDraw(Canvas c) {
         c.drawColor(0xFF0B0F1A);
-        // stick
         p.setStyle(Paint.Style.FILL); p.setColor(0xFF1C2333);
         c.drawCircle(scx, scy, sr, p);
         p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(u * 0.5f); p.setColor(0xFF455A64);
         c.drawCircle(scx, scy, sr, p);
-        p.setStyle(Paint.Style.FILL); p.setColor(dpad ? 0xFFFFB74D : 0xFF4DD0E1);
-        c.drawCircle(scx + sx * sr * 0.6f, scy + sy * sr * 0.6f, 10 * u, p);
-        // buttons
+        p.setStyle(Paint.Style.FILL); p.setColor(0xFF4DD0E1);
+        float kx = stickHeld ? sx : tiltX;
+        c.drawCircle(scx + kx * sr * 0.6f, scy + (stickHeld ? sy : 0) * sr * 0.6f, 10 * u, p);
         p.setTextSize(4.2f * u);
         for (Btn b : btns) {
             String label = b.label;
             boolean on = false;
-            if (b.act == ACT_KEYS) { label = keys ? "KEYBOARD" : "GAMEPAD"; on = keys; }
-            else if (b.act == ACT_TILT) { label = tilt ? "TILT: ON" : "TILT: OFF"; on = tilt; }
-            else if (b.act == ACT_DPAD) { label = dpad ? "D-PAD" : "STICK"; on = dpad; }
+            if (b.act == ACT_TILT) { label = tilt ? "TILT STEER: ON" : "TILT STEER: OFF"; on = tilt; }
             p.setStyle(Paint.Style.FILL);
             p.setColor(b.down ? 0xFFFFFFFF : b.color);
             if (b.round) c.drawCircle(b.cx, b.cy, b.rad, p);
@@ -144,9 +135,8 @@ public class GamepadView extends View {
         } else if (a == MotionEvent.ACTION_CANCEL) {
             releaseAll();
         }
-        recalc();
+        updateDirs();
         invalidate();
-        host.onInput();
         return true;
     }
 
@@ -154,7 +144,8 @@ public class GamepadView extends View {
         for (Btn b : btns) {
             if (b.r.contains(x, y)) {
                 owner.put(id, b);
-                if (b.act != 0) host.onAction(b.act); else b.down = true;
+                if (b.act != 0) host.onAction(b.act);
+                else { b.down = true; host.onKey(b.key, true); }
                 return;
             }
         }
@@ -169,14 +160,18 @@ public class GamepadView extends View {
         Object o = owner.get(id);
         owner.remove(id);
         if (o == STICK) { stickHeld = false; sx = 0; sy = 0; }
-        else if (o instanceof Btn) ((Btn) o).down = false;
+        else if (o instanceof Btn) {
+            Btn b = (Btn) o;
+            if (b.down) { b.down = false; host.onKey(b.key, false); }
+        }
     }
 
+    /** Releases every key (used when the app pauses so nothing stays stuck on the TV). */
     public void releaseAll() {
         owner.clear();
-        for (Btn b : btns) b.down = false;
-        stickHeld = false; sx = 0; sy = 0;
-        recalc();
+        for (Btn b : btns) if (b.down) { b.down = false; host.onKey(b.key, false); }
+        stickHeld = false; sx = 0; sy = 0; tiltX = 0;
+        updateDirs();
         invalidate();
     }
 
@@ -188,9 +183,26 @@ public class GamepadView extends View {
         sy = dy / sr;
     }
 
-    private void recalc() {
-        int m = 0;
-        for (Btn b : btns) if (b.down) m |= b.bit;
-        buttons = m;
+    /** Tilt steering input, -1..1. */
+    public void setTilt(float x) {
+        tiltX = x;
+        updateDirs();
+        postInvalidate();
+    }
+
+    private void updateDirs() {
+        float x = stickHeld ? sx : (tilt ? tiltX : 0);
+        float y = stickHeld ? sy : 0;
+        set(0, y, true);
+        set(1, y, false);
+        set(2, x, true);
+        set(3, x, false);
+    }
+
+    // idx: 0 up (y<0), 1 down (y>0), 2 left (x<0), 3 right (x>0); hysteresis 0.50 on / 0.30 off
+    private void set(int idx, float v, boolean negative) {
+        float m = negative ? -v : v;
+        boolean on = dirOn[idx] ? m > 0.30f : m > 0.50f;
+        if (on != dirOn[idx]) { dirOn[idx] = on; host.onKey(dirKey[idx], on); }
     }
 }

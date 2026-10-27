@@ -1,7 +1,6 @@
-# TV Pad
+# TV Pad (Wi-Fi controller)
 
-Turns your Android phone (Android 9+) into a Bluetooth game controller and keyboard/TV remote.
-Any TV, box or PC that accepts a Bluetooth gamepad or keyboard sees it as a normal controller, so it works with any game.
+Phone app that works as a game controller over your phone's hotspot. No Bluetooth, no router.
 
-- GAMEPAD mode: left stick (or D-pad), A/B/X/Y, L1/L2/R1/R2, Start/Select, optional tilt steering.
-- KEYBOARD mode (also works as a TV remote): stick = arrow keys, A = Space, B = Z, X = X, Y = C, L1 = Q, R1 = E, Start = Enter/OK, Select = Esc/Back, L2 = Shift, R2 = Ctrl.
+The phone runs a tiny server (port 8765). Games on the TV connect to it and receive key presses
+(D-pad, A/B/X/Y, L1/R1 = keys 1/3, L2/R2, Start, Back, OK), so each game needs the small `PadClient` receiver.
